@@ -12,7 +12,7 @@ RUN apt-get update \
         gcc \
         libc6-dev \
     && rm -rf /var/lib/apt/lists/*
-COPY convert-json-to-quip.py /usr/bin/
-RUN chmod +x /usr/bin/convert-json-to-quip.py
+COPY convert-json-to-quip.py make-manifest.py /usr/bin/
+RUN chmod +x /usr/bin/convert-json-to-quip.py /usr/bin/make-manifest.py
 ENTRYPOINT ["/usr/bin/convert-json-to-quip.py"]
 WORKDIR /work
