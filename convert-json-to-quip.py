@@ -1,7 +1,16 @@
 #!/usr/bin/env python
 """Convert JSON output of HoVerNet to a Quip-compatible format.
 
-This creates a JSON meta file and CSV file of features for each predicted class.
+This creates the following directory structure for loading into Quip.
+
+{analysis-id}/
+└── {subject-id}-{case-id}
+    ├── type0
+    │   ├── {analysis-id}_type0-algmeta.json
+    │   └── {analysis-id}_type0-features.csv
+    └── typeN
+        ├── {analysis-id}_typeN-algmeta.json
+        └── {analysis-id}_typeN-features.csv
 """
 
 import argparse
@@ -57,7 +66,7 @@ def write_quip_features_csv(
                 writer.writerow(row)
 
 
-def write_quip_manifest_json(
+def write_quip_algmeta_json(
     oslide: openslide.OpenSlide,
     output_path: PathType,
     out_file_prefix: str,
@@ -119,12 +128,14 @@ class TypedNameSpace(argparse.Namespace):
         self.analysis_id: str
         self.analysis_desc: str
         self.input_json: PathType
-        self.output_file_prefix: str
 
 
 def get_parsed_args(args=None) -> TypedNameSpace:
     ns = TypedNameSpace()
-    p = argparse.ArgumentParser(description=__doc__)
+    p = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     p.add_argument("--slide", required=True, help="Path to whole slide image.")
     p.add_argument("--subject-id", required=True, help="Subject ID")
     p.add_argument("--case-id", required=True, help="Case ID")
@@ -134,17 +145,19 @@ def get_parsed_args(args=None) -> TypedNameSpace:
         help="Analysis description. If omitted, uses analysis ID as description.",
     )
     p.add_argument("input_json", help="Path to HoVerNet output JSON.")
-    p.add_argument("output_file_prefix", help="Prefix of output files.")
     args = p.parse_args(args, namespace=ns)
+
     args.input_json = Path(args.input_json)
     args.slide = Path(args.slide)
+
     if not args.input_json.exists():
         p.error(f"input JSON file not found: {args.input_json}")
     if not args.slide.exists():
         p.error(f"slide file not found: {args.slide}")
+
     # Make sure output prefix does not have characters that might mess things up.
-    args.output_file_prefix = "".join(
-        char for char in args.output_file_prefix if char not in r'\/:*?"<>|'
+    args.analysis_id = "".join(
+        char for char in args.analysis_id if char not in r'\/:*?"<>|'
     )
     return args
 
@@ -166,26 +179,45 @@ def main(args=None) -> None:
     print(f"Opening slide: {args.slide}")
     oslide = openslide.OpenSlide(str(args.slide))
 
+    # Create directory tree.
+    out_root = Path(args.analysis_id)
+    out_second = out_root / f"{args.subject_id}-{args.case_id}"
+    if out_second.exists():
+        print(f"[WARNING] output directory already exists {out_second}")
+        print("[WARNING] potentially overwriting files")
+    out_second.mkdir(parents=True, exist_ok=True)
+
     print("-" * 40)
     for nuc_type in nuc_types:
         print(f"Working on nuclear prediction type {nuc_type}")
-        out_file_prefix = f"{args.output_file_prefix}_type{nuc_type}"
-        features_file = f"{out_file_prefix}-features.csv"
+        out_dir = out_second / f"type{nuc_type}"
+        if out_dir.exists():
+            print(f"[WARNING] output directory exists: {out_dir}")
+            print("[WARNING] potentially overwriting files")
+        out_dir.mkdir(exist_ok=True)
+        print(f"Saving outputs to {out_dir}")
+
+        out_file_prefix = f"{args.analysis_id}-type{nuc_type}"
+
+        # Create features CSV.
+        features_file = out_dir / f"{out_file_prefix}-features.csv"
         print(f"Writing features to {features_file}")
         write_quip_features_csv(
             hovernet_json=hovernet_json,
             output_path=features_file,
             nuc_type=nuc_type,
         )
-        algmeta_file = f"{out_file_prefix}-algmeta.json"
-        print(f"Writing manifest to {algmeta_file}")
-        write_quip_manifest_json(
+
+        # Create algmeta JSON.
+        algmeta_file = out_dir / f"{out_file_prefix}-algmeta.json"
+        print(f"Writing algmeta to {algmeta_file}")
+        write_quip_algmeta_json(
             oslide=oslide,
             output_path=algmeta_file,
-            out_file_prefix=args.output_file_prefix,
+            out_file_prefix=out_file_prefix,
             subject_id=args.subject_id,
             case_id=args.case_id,
-            analysis_id=args.analysis_id,
+            analysis_id=f"{args.analysis_id}-type{nuc_type}",
             analysis_desc=args.analysis_desc,
         )
         print("-" * 40)
